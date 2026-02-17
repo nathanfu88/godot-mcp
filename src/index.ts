@@ -190,53 +190,6 @@ class GodotServer {
     const response: any = {
       content: [
         {
-          name: "simulate_input",
-          description: "Send simulated input events (mouse, keyboard, actions) to a running Godot project via TCP. Requires GodotMCPInput autoload in target project. Use setup_input_simulation to install the addon first.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              commands: {
-                type: "array",
-                description: "Sequence of input commands. Each command has a \"type\" field: \"click\" (x, y, button?, double?), \"mouse_move\" (x, y), \"mouse_drag\" (from_x, from_y, to_x, to_y, button?), \"key\" (key, modifiers?), \"action\" (action, pressed?), \"action_pulse\" (action, duration_ms?), \"text\" (text, delay_ms?), \"wait\" (duration_ms), \"screenshot\" (output_path?)",
-                items: {
-                  type: "object",
-                  properties: {
-                    type: {
-                      type: "string",
-                      enum: ["click", "mouse_move", "mouse_drag", "key", "action", "action_pulse", "text", "wait", "screenshot"],
-                      description: "Command type",
-                    },
-                  },
-                  required: ["type"],
-                },
-              },
-              port: {
-                type: "number",
-                description: "TCP port the game is listening on (default: 7070)",
-              },
-              timeoutMs: {
-                type: "number",
-                description: "Max time to wait for completion in milliseconds (default: 30000)",
-              },
-            },
-            required: ["commands"],
-          },
-        },
-        {
-          name: "setup_input_simulation",
-          description: "Install the GodotMCPInput addon to a Godot project for input simulation support. After installation, add the autoload in Godot: Project > Project Settings > Autoload > Add res://addons/godot_mcp_input/godot_mcp_input.gd as \"GodotMCPInput\"",
-          inputSchema: {
-            type: "object",
-            properties: {
-              projectPath: {
-                type: "string",
-                description: "Path to the Godot project directory",
-              },
-            },
-            required: ["projectPath"],
-          },
-        },
-        {
           type: 'text',
           text: message,
         },
@@ -711,6 +664,54 @@ class GodotServer {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
       tools: [
         {
+          name: "simulate_input",
+          description: "Send simulated input events (mouse, keyboard, actions) to a running Godot project via TCP. Requires GodotMCPInput autoload in target project. Use setup_input_simulation to install the addon first.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              commands: {
+                type: "array",
+                description: "Sequence of input commands. Each command has a \"type\" field: \"click\" (x, y, button?, double?), \"mouse_move\" (x, y), \"mouse_drag\" (from_x, from_y, to_x, to_y, button?), \"key\" (key, modifiers?), \"action\" (action, pressed?), \"action_pulse\" (action, duration_ms?), \"text\" (text, delay_ms?), \"wait\" (duration_ms), \"screenshot\" (output_path?)",
+                items: {
+                  type: "object",
+                  properties: {
+                    type: {
+                      type: "string",
+                      enum: ["click", "mouse_move", "mouse_drag", "key", "action", "action_pulse", "text", "wait", "screenshot"],
+                      description: "Command type",
+                    },
+                  },
+                  required: ["type"],
+                },
+              },
+              port: {
+                type: "number",
+                description: "TCP port the game is listening on (default: 7070)",
+              },
+              timeoutMs: {
+                type: "number",
+                description: "Max time to wait for completion in milliseconds (default: 30000)",
+              },
+            },
+            required: ["commands"],
+          },
+        },
+        {
+          name: "setup_input_simulation",
+          description: "Install the GodotMCPInput addon to a Godot project for input simulation support. After installation, add the autoload in Godot: Project > Project Settings > Autoload > Add res://addons/godot_mcp_input/godot_mcp_input.gd as \"GodotMCPInput\"",
+          inputSchema: {
+            type: "object",
+            properties: {
+              projectPath: {
+                type: "string",
+                description: "Path to the Godot project directory",
+              },
+            },
+            required: ["projectPath"],
+          },
+        },
+
+        {
           name: 'launch_editor',
           description: 'Launch Godot editor for a specific project',
           inputSchema: {
@@ -973,6 +974,11 @@ class GodotServer {
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       this.logDebug(`Handling tool request: ${request.params.name}`);
       switch (request.params.name) {
+        case "simulate_input":
+          return await this.handleSimulateInput(request.params.arguments);
+        case "setup_input_simulation":
+          return await this.handleSetupInputSimulation(request.params.arguments);
+
         case 'launch_editor':
           return await this.handleLaunchEditor(request.params.arguments);
         case 'run_project':
@@ -1028,7 +1034,7 @@ class GodotServer {
     if (!this.validatePath(args.projectPath)) {
       return this.createErrorResponse(
         'Invalid project path',
-        ['Provide a valid path without \"..\" or other potentially unsafe characters']
+        ['Provide a valid path without ".." or other potentially unsafe characters']
       );
     }
 
@@ -1107,7 +1113,7 @@ class GodotServer {
     if (!this.validatePath(args.projectPath)) {
       return this.createErrorResponse(
         'Invalid project path',
-        ['Provide a valid path without \"..\" or other potentially unsafe characters']
+        ['Provide a valid path without ".." or other potentially unsafe characters']
       );
     }
 
@@ -1157,9 +1163,11 @@ class GodotServer {
         });
       });
 
-      process.on('exit', (code: number | null) => {
+      process.on("exit", (code: number | null) => {
         this.logDebug(`Godot process exited with code ${code}`);
         if (this.activeProcess && this.activeProcess.process === process) {
+          this.lastProcessOutput = this.activeProcess.output;
+          this.lastProcessErrors = this.activeProcess.errors;
           this.activeProcess = null;
         }
       });
@@ -1197,7 +1205,7 @@ class GodotServer {
   /**
    * Handle the get_debug_output tool
    */
-  private async handleGetDebugOutput() {
+    private async handleGetDebugOutput() {
     const output = this.activeProcess ? this.activeProcess.output : this.lastProcessOutput;
     const errors = this.activeProcess ? this.activeProcess.errors : this.lastProcessErrors;
 
@@ -2189,254 +2197,6 @@ class GodotServer {
     }
   }
 
-
-  /**
-   * Get or create a persistent socket connection to the game
-   */
-  private async getInputSocket(port: number): Promise<Socket> {
-    // If we have a valid connection on the same port, reuse it
-    if (this.inputSocket && this.inputSocketPort === port) {
-      const status = this.inputSocket.readyState;
-      if (status === "open") {
-        return this.inputSocket;
-      }
-      // Connection is dead, clean up
-      this.inputSocket.destroy();
-      this.inputSocket = null;
-    }
-
-    // Create new connection
-    return new Promise((resolve, reject) => {
-      const socket = createConnection({ port, host: "127.0.0.1" }, () => {
-        this.inputSocket = socket;
-        this.inputSocketPort = port;
-        resolve(socket);
-      });
-
-      socket.on("error", (err: Error) => {
-        this.inputSocket = null;
-        reject(err);
-      });
-
-      socket.on("close", () => {
-        if (this.inputSocket === socket) {
-          this.inputSocket = null;
-        }
-      });
-    });
-  }
-
-  /**
-   * Handle the simulate_input tool
-   * Sends simulated input events to a running Godot project via TCP
-   */
-  private async handleSimulateInput(args: any) {
-    args = this.normalizeParameters(args);
-    const commands = args.commands;
-    const timeoutMs = args.timeoutMs || 30000;
-    const port = args.port || 7070;
-
-    if (!commands || !Array.isArray(commands) || commands.length === 0) {
-      return this.createErrorResponse(
-        "Commands array is required and must not be empty",
-        ["Provide at least one input command"]
-      );
-    }
-
-    const payload = {
-      id: Date.now().toString(),
-      commands: commands,
-    };
-
-    let socket;
-    try {
-      socket = await this.getInputSocket(port);
-    } catch (err: any) {
-      return this.createErrorResponse(
-        "Failed to connect to game on port " + port + ": " + err.message,
-        [
-          "Ensure the game is running with GodotMCPInput autoload enabled",
-          "The game listens on 127.0.0.1:7070 by default",
-        ]
-      );
-    }
-
-    return new Promise((resolve) => {
-      let responseData = "";
-      let resolved = false;
-
-      const cleanup = () => {
-        socket.removeListener("data", onData);
-        socket.removeListener("error", onError);
-        socket.removeListener("close", onClose);
-      };
-
-      const timeout = setTimeout(() => {
-        if (!resolved) {
-          resolved = true;
-          cleanup();
-          // Don't destroy the socket on timeout, just report the error
-          resolve(this.createErrorResponse(
-            "Timeout waiting for input commands to complete",
-            [
-              "Ensure the game is running with GodotMCPInput autoload enabled",
-              "Use setup_input_simulation to install the addon first",
-              "Add autoload in Godot: Project > Project Settings > Autoload",
-            ]
-          ));
-        }
-      }, timeoutMs);
-
-      const onData = (data: Buffer) => {
-        responseData += data.toString();
-        const newlinePos = responseData.indexOf("\n");
-        if (newlinePos !== -1) {
-          clearTimeout(timeout);
-          if (!resolved) {
-            resolved = true;
-            cleanup();
-            try {
-              const response = JSON.parse(responseData.substring(0, newlinePos));
-              let resultText = "Executed " + commands.length + " commands.";
-              if (response.screenshot_path) {
-                resultText += "\nScreenshot: " + response.screenshot_path;
-              }
-              if (response.errors && response.errors.length > 0) {
-                resultText += "\nErrors: " + response.errors.join(", ");
-              }
-              resolve({
-                content: [{ type: "text", text: resultText }],
-                isError: response.errors && response.errors.length > 0,
-              });
-            } catch (e) {
-              resolve(this.createErrorResponse("Invalid response from game", []));
-            }
-          }
-        }
-      };
-
-      const onError = (err: Error) => {
-        clearTimeout(timeout);
-        if (!resolved) {
-          resolved = true;
-          cleanup();
-          this.inputSocket = null; // Mark connection as dead
-          resolve(this.createErrorResponse(
-            "Connection error: " + err.message,
-            ["The game may have closed or the connection was lost"]
-          ));
-        }
-      };
-
-      const onClose = () => {
-        clearTimeout(timeout);
-        if (!resolved) {
-          resolved = true;
-          cleanup();
-          this.inputSocket = null;
-          resolve(this.createErrorResponse("Connection closed unexpectedly", []));
-        }
-      };
-
-      socket.on("data", onData);
-      socket.on("error", onError);
-      socket.on("close", onClose);
-
-      // Send the command
-      socket.write(JSON.stringify(payload) + "\n");
-    });
-  }
-
-  /**
-   * Handle the setup_input_simulation tool
-   * Copies the GodotMCPInput addon to the target project
-   */
-  private async handleSetupInputSimulation(args: any) {
-    args = this.normalizeParameters(args);
-    const projectPath = args.projectPath;
-
-    if (!projectPath) {
-      return this.createErrorResponse(
-        "Project path is required",
-        ["Provide a valid path to a Godot project directory"]
-      );
-    }
-
-    if (!this.validatePath(projectPath)) {
-      return this.createErrorResponse(
-        "Invalid project path",
-        ["Provide a valid path without \"..\" or other potentially unsafe characters"]
-      );
-    }
-
-    // Check if project exists
-    const projectFile = join(projectPath, "project.godot");
-    if (!existsSync(projectFile)) {
-      return this.createErrorResponse(
-        "Not a valid Godot project: " + projectPath,
-        [
-          "Ensure the path points to a directory containing a project.godot file",
-          "Use list_projects to find valid Godot projects",
-        ]
-      );
-    }
-
-    // Resolve addon source path (relative to this script)
-    const addonSrcDir = join(__dirname, "addons", "godot_mcp_input");
-    const addonDestDir = join(projectPath, "addons", "godot_mcp_input");
-
-    // Check if source addon exists
-    if (!existsSync(addonSrcDir)) {
-      return this.createErrorResponse(
-        "GodotMCPInput addon not found in server distribution",
-        [
-          "Ensure godot-mcp was built correctly",
-          "The addon should be at: " + addonSrcDir,
-        ]
-      );
-    }
-
-    try {
-      // Create addons directory if needed
-      const addonsDir = join(projectPath, "addons");
-      if (!existsSync(addonsDir)) {
-        await mkdir(addonsDir, { recursive: true });
-      }
-
-      // Create addon destination directory
-      if (!existsSync(addonDestDir)) {
-        await mkdir(addonDestDir, { recursive: true });
-      }
-
-      // Copy addon files
-      const filesToCopy = ["godot_mcp_input.gd", "plugin.cfg"];
-      for (const file of filesToCopy) {
-        const srcPath = join(addonSrcDir, file);
-        const destPath = join(addonDestDir, file);
-        if (existsSync(srcPath)) {
-          copyFileSync(srcPath, destPath);
-        }
-      }
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: "GodotMCPInput addon installed to " + addonDestDir + "\n\nTo enable input simulation:\n1. Open your project in Godot Editor\n2. Go to Project > Project Settings > Autoload\n3. Click the folder icon and select: res://addons/godot_mcp_input/godot_mcp_input.gd\n4. Set the Node Name to: GodotMCPInput\n5. Click Add\n\nThe addon will now poll for input commands when the game runs.",
-          },
-        ],
-      };
-    } catch (error: any) {
-      return this.createErrorResponse(
-        "Failed to install addon: " + (error.message || "Unknown error"),
-        [
-          "Ensure you have write permissions to the project directory",
-          "Check that the addons directory is not locked",
-        ]
-      );
-    }
-  }
-
   /**
    * Run the MCP server
    */
@@ -2479,6 +2239,143 @@ class GodotServer {
       process.exit(1);
     }
   }
+  private async getInputSocket(port: number): Promise<Socket> {
+    if (this.inputSocket && this.inputSocketPort === port) {
+      const status = this.inputSocket.readyState;
+      if (status === "open") return this.inputSocket;
+      this.inputSocket.destroy();
+      this.inputSocket = null;
+    }
+
+    return new Promise((resolve, reject) => {
+      const socket = createConnection({ port, host: "127.0.0.1" }, () => {
+        this.inputSocket = socket;
+        this.inputSocketPort = port;
+        resolve(socket);
+      });
+
+      socket.on("error", (err: Error) => {
+        this.inputSocket = null;
+        reject(err);
+      });
+
+      socket.on("close", () => {
+        if (this.inputSocket === socket) this.inputSocket = null;
+      });
+    });
+  }
+
+  private async handleSimulateInput(args: any) {
+    args = this.normalizeParameters(args);
+    const commands = args.commands;
+    const timeoutMs = args.timeoutMs || 30000;
+    const port = args.port || 7070;
+
+    if (!commands || !Array.isArray(commands) || commands.length === 0) {
+      return this.createErrorResponse("Commands array is required and must not be empty");
+    }
+
+    const payload = { id: Date.now().toString(), commands: commands };
+
+    let socket;
+    try {
+      socket = await this.getInputSocket(port);
+    } catch (err: any) {
+      return this.createErrorResponse("Failed to connect: " + err.message);
+    }
+
+    return new Promise((resolve) => {
+      let responseData = "";
+      let resolved = false;
+      const cleanup = () => {
+        socket.removeListener("data", onData);
+        socket.removeListener("error", onError);
+        socket.removeListener("close", onClose);
+      };
+
+      const timeout = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          cleanup();
+          resolve(this.createErrorResponse("Timeout waiting for input"));
+        }
+      }, timeoutMs);
+
+      const onData = (data: Buffer) => {
+        responseData += data.toString();
+        const newlinePos = responseData.indexOf("\n");
+        if (newlinePos !== -1) {
+          clearTimeout(timeout);
+          if (!resolved) {
+            resolved = true;
+            cleanup();
+            try {
+              const response = JSON.parse(responseData.substring(0, newlinePos));
+              let resultText = "Executed " + commands.length + " commands.";
+              if (response.screenshot_path) resultText += "\nScreenshot: " + response.screenshot_path;
+              if (response.errors && response.errors.length > 0) resultText += "\nErrors: " + response.errors.join(", ");
+              resolve({
+                content: [{ type: "text", text: resultText }],
+                isError: response.errors && response.errors.length > 0,
+              });
+            } catch (e) {
+              resolve(this.createErrorResponse("Invalid response from game"));
+            }
+          }
+        }
+      };
+
+      const onError = (err: Error) => {
+        clearTimeout(timeout);
+        if (!resolved) {
+          resolved = true;
+          cleanup();
+          this.inputSocket = null;
+          resolve(this.createErrorResponse("Connection error: " + err.message));
+        }
+      };
+
+      const onClose = () => {
+        clearTimeout(timeout);
+        if (!resolved) {
+          resolved = true;
+          cleanup();
+          this.inputSocket = null;
+          resolve(this.createErrorResponse("Connection closed unexpectedly"));
+        }
+      };
+
+      socket.on("data", onData);
+      socket.on("error", onError);
+      socket.on("close", onClose);
+      socket.write(JSON.stringify(payload) + "\n");
+    });
+  }
+
+  private async handleSetupInputSimulation(args: any) {
+    args = this.normalizeParameters(args);
+    const projectPath = args.projectPath;
+    if (!projectPath) return this.createErrorResponse("Project path is required");
+    const addonSrcDir = join(__dirname, "addons", "godot_mcp_input");
+    const addonDestDir = join(projectPath, "addons", "godot_mcp_input");
+
+    if (!existsSync(addonSrcDir)) return this.createErrorResponse("Addon not found at " + addonSrcDir);
+
+    try {
+      if (!existsSync(join(projectPath, "addons"))) mkdirSync(join(projectPath, "addons"), { recursive: true });
+      if (!existsSync(addonDestDir)) mkdirSync(addonDestDir, { recursive: true });
+
+      ["godot_mcp_input.gd", "plugin.cfg"].forEach(file => {
+        const src = join(addonSrcDir, file);
+        if (existsSync(src)) copyFileSync(src, join(addonDestDir, file));
+      });
+
+      return { content: [{ type: "text", text: "Addon installed" }] };
+    } catch (error: any) {
+      return this.createErrorResponse("Failed to install: " + error.message);
+    }
+  }
+
 }
 
 // Create and run the server
